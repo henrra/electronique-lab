@@ -24,6 +24,12 @@ MFRC522 rfid(SS_PIN, RST_PIN); // Création de l'instance du module
 #define OLED_RESET -1
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
+
+// Définition des broches pour les LED
+#define LED_RED_PIN   12
+#define LED_GREEN_PIN 14
+
+
 void displayCardUID();
 bool isAuthorizedUID();
 void beep(uint8_t repeat, uint16_t duration);
@@ -37,8 +43,14 @@ void setup()
     rfid.PCD_Init();      // Initialisation du module RC522
         
     pinMode(BUZZER_PIN, OUTPUT); // Définir la broche du buzzer comme sortie
-    // digitalWrite(BUZZER_PIN, LOW); // Éteindre le buzzer au démarrage
+    pinMode(LED_GREEN_PIN, OUTPUT);
+    pinMode(LED_RED_PIN, OUTPUT);
+        
     beep(1, 100); // Buzzer pour indiquer que le système est prêt
+
+    // S'assure que les LED sont éteintes au démarrage
+    digitalWrite(LED_GREEN_PIN, LOW);
+    digitalWrite(LED_RED_PIN, LOW);
 
      // Initialisation de l'écran OLED à l'adresse 0x3C (adresse standard)
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
@@ -173,6 +185,8 @@ void beep(uint8_t repeat = 1, uint16_t duration = 200)
 
 void playAccessGranted()
 {
+    digitalWrite(LED_GREEN_PIN, HIGH); // Allume la LED verte
+
     tone(BUZZER_PIN, 1318, 100); // 1er bip (Mi 6) pendant 100 ms
     delay(150);                  // 100 ms de son + 50 ms de pause
 
@@ -180,10 +194,15 @@ void playAccessGranted()
     delay(200);
 
     noTone(BUZZER_PIN); // Sécurité pour couper le son
+
+    delay(1000);                       // Laisse la LED allumée 1 sec
+    digitalWrite(LED_GREEN_PIN, LOW);  // Éteint la LED verte
 }
 
 void playAccessDenied()
 {
+    digitalWrite(LED_RED_PIN, HIGH);   // Allume la LED rouge
+
     tone(BUZZER_PIN, 370, 150); // Note grave
     delay(180);                 // Durée note + pause
 
@@ -191,4 +210,7 @@ void playAccessDenied()
     delay(300);
 
     noTone(BUZZER_PIN);
+
+    delay(1000);                       // Laisse la LED allumée 1 sec
+    digitalWrite(LED_RED_PIN, LOW);    // Éteint la LED rouge
 }
