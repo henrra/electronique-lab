@@ -1,158 +1,104 @@
 #include <Arduino.h>
 #include <SPI.h>     // Bibliothèque pour la communication SPI
 #include <MFRC522.h> // Bibliothèque pour le module RFID
-#include <Adafruit_SSD1306.h>
 #include <Wire.h>
+#include <U8g2lib.h>
 
-// Importation d'une police spécifique (ex: taille 9pt ou 12pt)
-// Adafruit GFX Library
-#include <Fonts/FreeSans9pt7b.h>
-#include <Fonts/FreeSans12pt7b.h>
+#define SS_PIN 5      // Broche SDA (Chip Select)
+#define RST_PIN 4     // Broche Reset
+#define BUZZER_PIN 25 // Broche du buzzer
 
-#define SS_PIN 5   // Broche SDA (Chip Select)
-#define RST_PIN 4    // Déplacé du GPIO 22 au GPIO 4 pour libérer l'OLED !
-#define BUZZER_PIN 25 // Broche du buzzer, à adapter selon le montage
+const byte AUTH_UID[] = {0xA3, 0x98, 0x64, 0x06}; // Remplace par ton vrai UID
 
-const byte AUTH_UID[] = {0xA3, 0x98, 0x64, 0x06}; // Remplace par le vrai UID autorisé
+MFRC522 rfid(SS_PIN, RST_PIN);
 
-MFRC522 rfid(SS_PIN, RST_PIN); // Création de l'instance du module
-
-
-// Configuration de l'écran OLED (Taille standard 128x64)
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
+// Configuration de l'écran OLED (SSD1306 128x64 I2C)
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
 
 // Définition des broches pour les LED
 #define LED_RED_PIN   12
 #define LED_GREEN_PIN 14
 
-
+// Prototypes de fonctions
 void displayCardUID();
 bool isAuthorizedUID();
 void beep(uint8_t repeat, uint16_t duration);
 void playAccessGranted();
 void playAccessDenied();
+void printDefaultInfos();
+void printAccessGranted();
+void printAccessDenied();
 
 void setup()
 {
-    Serial.begin(115200); // Initialisation du moniteur série
-    SPI.begin();          // Initialisation du bus SPI
-    rfid.PCD_Init();      // Initialisation du module RC522
+    Serial.begin(115200);
+    SPI.begin();
+    rfid.PCD_Init();
         
-    pinMode(BUZZER_PIN, OUTPUT); // Définir la broche du buzzer comme sortie
+    pinMode(BUZZER_PIN, OUTPUT);
     pinMode(LED_GREEN_PIN, OUTPUT);
     pinMode(LED_RED_PIN, OUTPUT);
-        
-    beep(1, 100); // Buzzer pour indiquer que le système est prêt
 
-    // S'assure que les LED sont éteintes au démarrage
     digitalWrite(LED_GREEN_PIN, LOW);
     digitalWrite(LED_RED_PIN, LOW);
 
-     // Initialisation de l'écran OLED à l'adresse 0x3C (adresse standard)
-    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
-    {
-        Serial.println(F("Erreur : Écran OLED non détecté !"));
-        for (;;)
-            ; // Bloquer le programme si l'écran n'est pas trouvé
-    }
+    u8g2.begin();
+    u8g2.enableUTF8Print(); // Active la prise en charge UTF-8 globale pour U8g2
 
-    // Message d'accueil sur l'OLED
-    display.clearDisplay();
-    // 1. Activer la police personnalisée
-    display.setFont(&FreeSans9pt7b); 
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(20, 30);
-    display.println(F("Tongasoa !"));
-    display.display();
-    delay(1500);
+    beep(1, 100); // Bip au démarrage
+
+    printDefaultInfos();
 }
 
 void loop()
 {
-     
-    // Effacer l'écran avant d'écrire la nouvelle valeur
-    display.clearDisplay();
-    
-    // Titre en haut de l'écran
-    display.setFont(NULL); // Revenir à la police par défaut pour le titre
-    display.setTextSize(1);
-    display.setCursor(0, 0);
-    display.println(F("Votre badge"));
-    display.drawLine(0, 10, 128, 10, SSD1306_WHITE); // Petite ligne de séparation
-    
-
-    display.setTextSize(1);
-    display.setFont(&FreeSans9pt7b);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(20, 30);
-    display.println(F("Tonga soa !"));
-    display.display();
-
     // Vérifie si une nouvelle carte est présente
-    if (!rfid.PICC_IsNewCardPresent())
+    if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial())
     {
-        delay(2000);
+        delay(50); // Petite pause pour alléger le CPU
         return;
     }
 
-    // Vérifie si l'UID de la carte a pu être lu
-    if (!rfid.PICC_ReadCardSerial())
-    {
-        delay(2000);
-        return;
-    }
-
+    // Vérifie les droits d'accès
     if (isAuthorizedUID())
-    {
-        display.setCursor(5, 50);
-        display.println(F("Acces autorise"));
-        display.display();        
+    {       
         playAccessGranted();
-        // Ici tu mets ta vraie action pour le badge autorisé
     }
     else
     {
-        display.setCursor(5, 50);
-        display.println(F("Acces refuse"));
-        display.display();
         playAccessDenied();
-        // Ici tu mets ta vraie action pour le badge non autorisé
     }
 
-    delay(2000); // Pause pour permettre à l'utilisateur de voir le résultat
+    // Réinitialise l'affichage par défaut après le traitement
+    printDefaultInfos();
 
-    // Arrête la communication avec la carte actuelle
+    // Halte de la carte
     rfid.PICC_HaltA();
     rfid.PCD_StopCrypto1();
+    
+    delay(1000); // Anti-rebond avant de pouvoir relire une carte
 }
 
 void displayCardUID()
 {
-    // Affichage du type de carte (optionnel)
-    display.clearDisplay();
-    display.setFont(NULL); 
-    display.setCursor(5, 20);
-    display.print("Type: ");
+    char buffer[30] = "";
     MFRC522::PICC_Type piccType = rfid.PICC_GetType(rfid.uid.sak);
-    display.println(rfid.PICC_GetTypeName(piccType));
-    display.display();
+    String typeText = String(rfid.PICC_GetTypeName(piccType));
 
-    display.setCursor(5, 30);
-    display.print(F("UID: "));
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_6x10_tf);
+    u8g2.drawUTF8(0, 12, "Type:");
+    u8g2.drawUTF8(40, 12, typeText.c_str());
+
+    strcpy(buffer, "UID: ");
     for (byte i = 0; i < rfid.uid.size; i++)
     {
-        display.print(' ');
-        if (rfid.uid.uidByte[i] < 0x10)
-            display.print('0');
-        display.print(rfid.uid.uidByte[i], HEX);
+        char temp[5];
+        snprintf(temp, sizeof(temp), "%02X ", rfid.uid.uidByte[i]);
+        strcat(buffer, temp);
     }
-
-    display.display();
+    u8g2.drawUTF8(0, 32, buffer);
+    u8g2.sendBuffer();
 }
 
 bool isAuthorizedUID()
@@ -173,7 +119,7 @@ bool isAuthorizedUID()
     return true;
 }
 
-void beep(uint8_t repeat = 1, uint16_t duration = 200)
+void beep(uint8_t repeat, uint16_t duration)
 {
     for (uint8_t i = 0; i < repeat; i++)
     {
@@ -185,32 +131,58 @@ void beep(uint8_t repeat = 1, uint16_t duration = 200)
 
 void playAccessGranted()
 {
-    digitalWrite(LED_GREEN_PIN, HIGH); // Allume la LED verte
+    printAccessGranted();
+    digitalWrite(LED_GREEN_PIN, HIGH);
 
-    tone(BUZZER_PIN, 1318, 100); // 1er bip (Mi 6) pendant 100 ms
-    delay(150);                  // 100 ms de son + 50 ms de pause
-
-    tone(BUZZER_PIN, 1760, 200); // 2e bip plus aigu (La 6) pendant 200 ms
+    tone(BUZZER_PIN, 1318, 100);
+    delay(150);
+    tone(BUZZER_PIN, 1760, 200);
     delay(200);
+    noTone(BUZZER_PIN);
 
-    noTone(BUZZER_PIN); // Sécurité pour couper le son
-
-    delay(1000);                       // Laisse la LED allumée 1 sec
-    digitalWrite(LED_GREEN_PIN, LOW);  // Éteint la LED verte
+    delay(1500); // Maintient la LED et le message
+    digitalWrite(LED_GREEN_PIN, LOW);
 }
 
 void playAccessDenied()
 {
-    digitalWrite(LED_RED_PIN, HIGH);   // Allume la LED rouge
+    printAccessDenied();
+    digitalWrite(LED_RED_PIN, HIGH);
 
-    tone(BUZZER_PIN, 370, 150); // Note grave
-    delay(180);                 // Durée note + pause
-
-    tone(BUZZER_PIN, 185, 300); // Note encore plus grave
+    tone(BUZZER_PIN, 370, 150);
+    delay(180);
+    tone(BUZZER_PIN, 185, 300);
     delay(300);
-
     noTone(BUZZER_PIN);
 
-    delay(1000);                       // Laisse la LED allumée 1 sec
-    digitalWrite(LED_RED_PIN, LOW);    // Éteint la LED rouge
+    delay(1500); // Maintient la LED et le message
+    digitalWrite(LED_RED_PIN, LOW);
+}
+
+void printDefaultInfos()
+{
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_6x10_tf);
+    u8g2.drawUTF8(20, 12, "Présentez badge");
+    u8g2.drawLine(0, 18, 127, 18);
+    
+    u8g2.setFont(u8g2_font_helvB12_tf); // Police avec support complet des accents (_tf)
+    u8g2.drawUTF8(20, 45, "Tonga soa !");
+    u8g2.sendBuffer();
+}
+
+void printAccessGranted()
+{
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_helvB10_tf); // Police _tf pour UTF-8
+    u8g2.drawUTF8(8, 38, "Accès autorisé");
+    u8g2.sendBuffer();
+}
+
+void printAccessDenied()
+{
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_helvB10_tf); // Police _tf pour UTF-8
+    u8g2.drawUTF8(12, 38, "Accès refusé");
+    u8g2.sendBuffer();
 }
